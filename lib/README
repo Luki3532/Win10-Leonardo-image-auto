@@ -1,0 +1,24 @@
+
+This directory is intended for project specific (private) libraries.
+PlatformIO will compile them to static libraries and link into executable file.
+
+The source code of each library should be placed in a separate directory
+("lib/your_library_name/").
+
+For example, see a structure of the following two libraries:
+
+|--lib
+|  |--Foo
+|  |  |--Foo.h
+|  |  |--Foo.cpp
+|  |--Bar
+|  |  |--Bar.h
+|  |  |--Bar.cpp
+|  |- README
+|--src
+   |- main.cpp
+
+Each library should contain a header file (*.h) and source file (*.cpp).
+
+More information:
+https://docs.platformio.org/page/librarymanager/ldf.html

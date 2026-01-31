@@ -1,0 +1,13 @@
+
+This directory is intended for PlatformIO Test Runner.
+
+Unit Testing is a software testing method where individual units of
+source code are tested to determine if they are fit for use.
+
+PlatformIO supports multiple test frameworks:
+- Unity (default for embedded)
+- Google Test
+- doctest
+
+More information:
+https://docs.platformio.org/page/plus/unit-testing.html
