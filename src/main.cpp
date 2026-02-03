@@ -1,14 +1,18 @@
 /**
- * Windows Auto-Wipe Device
+ * BIOS Password Removal / Windows 10 Install Device
  * Arduino Leonardo + 16x2 I2C LCD
  * 
- * Target: Dell machines (F12 boot menu, 3rd boot option)
+ * DUAL MODE OPERATION:
+ *   D7 only removed  -> BIOS Password Removal (types ls3gt1)
+ *   D7 AND D10 removed -> Windows 10 Clean Install
  * 
- * SAFETY: Press and HOLD the button for 3 seconds to arm and execute.
- *         Release early to abort. LCD shows countdown while holding.
+ * SAFETY WIRES:
+ *   - D7 to GND: Primary safety (must remove to do anything)
+ *   - D10 to GND: Mode select (remove for Win10 install, keep for BIOS password)
  * 
  * WIRING:
- *   - Arm Button: GND <-> Pin 7 (momentary push button)
+ *   - Safety Wire 1: Pin 7 <-> GND (remove to arm)
+ *   - Safety Wire 2: Pin 10 <-> GND (remove for Win10 mode)
  *   - LCD SDA: Pin 2
  *   - LCD SCL: Pin 3  
  *   - LCD VCC: 5V
@@ -29,6 +33,36 @@
 // ============================================
 bool payloadExecuted = false;
 bool lcdAvailable = false;
+
+// ============================================
+// Safety Wire Pins
+// ============================================
+#define SAFETY_PIN_1        7       // Primary safety wire (D7)
+#define SAFETY_PIN_2        10      // Secondary - mode select (D10)
+
+// ============================================
+// Safety Wire Check Functions
+// ============================================
+// Wire connected to GND = LOW = SAFE
+// Wire removed = HIGH (pullup) = ARMED
+
+bool isSafety1Off() {
+    return digitalRead(SAFETY_PIN_1) == HIGH;  // D7 removed = armed
+}
+
+bool isSafety2Off() {
+    return digitalRead(SAFETY_PIN_2) == HIGH;  // D10 removed = Win10 mode
+}
+
+// Check if device should execute at all (D7 must be removed)
+bool isSafetyOff() {
+    return isSafety1Off();
+}
+
+// Check if Win10 install mode (both D7 AND D10 removed)
+bool isWin10Mode() {
+    return isSafety1Off() && isSafety2Off();
+}
 
 // ============================================
 // LED Status Functions
@@ -129,6 +163,11 @@ bool waitForArmHold() {
     // Button was released early
     return false;
 }
+
+/* ============================================
+ * WINDOWS 10 INSTALLER PHASES - DISABLED
+ * Uncomment these sections to enable Windows 10 installation functionality
+ * ============================================
 
 // ============================================
 // Phase 1: Boot Menu
@@ -297,6 +336,81 @@ void startInstallation() {
 }
 
 // ============================================
+// Phase 6: OOBE (Out-of-Box Experience) Setup
+// ============================================
+void executeOOBESetup() {
+    // Wait for Windows installation to complete and OOBE to start
+    showCountdown("INSTALLING", "Wait for OOBE", OOBE_WAIT_TIME);
+    
+    const int TOTAL_STEPS = 8;
+    
+    // Step 1: Region selection - accept default, click Yes
+    showProgress(1, TOTAL_STEPS, "OOBE", "Region");
+    delay(OOBE_SCREEN_DELAY);
+    pressKey(KEY_RETURN);  // Yes/Next
+    
+    // Step 2: Keyboard layout - accept default, click Yes
+    showProgress(2, TOTAL_STEPS, "OOBE", "Keyboard");
+    delay(OOBE_SCREEN_DELAY);
+    pressKey(KEY_RETURN);  // Yes
+    
+    // Step 3: Second keyboard layout - Skip
+    showProgress(3, TOTAL_STEPS, "OOBE", "Skip 2nd KB");
+    delay(OOBE_SCREEN_DELAY);
+    pressKey(KEY_TAB);     // Tab to Skip
+    delay(200);
+    pressKey(KEY_RETURN);  // Skip
+    
+    // Step 4: Network - Skip (for offline setup)
+    showProgress(4, TOTAL_STEPS, "OOBE", "Skip Network");
+    delay(OOBE_SCREEN_DELAY);
+    // Press "I don't have internet" or skip
+    pressKey(KEY_TAB);
+    delay(200);
+    pressKey(KEY_RETURN);
+    delay(OOBE_SCREEN_DELAY);
+    // "Continue with limited setup"
+    pressKey(KEY_TAB);
+    delay(200);
+    pressKey(KEY_RETURN);
+    
+    // Step 5: Enter username (use "Admin" or similar)
+    showProgress(5, TOTAL_STEPS, "OOBE", "Username");
+    delay(OOBE_SCREEN_DELAY);
+    typeString("Admin");
+    delay(200);
+    pressKey(KEY_RETURN);  // Next
+    
+    // Step 6: Password - leave blank (no password)
+    showProgress(6, TOTAL_STEPS, "OOBE", "Skip Password");
+    delay(OOBE_SCREEN_DELAY);
+    // Don't type anything - just press Next for blank password
+    pressKey(KEY_RETURN);  // Next (blank password)
+    
+    // No password = no confirm screen, no security questions
+    // Windows skips those steps when password is blank
+    
+    // Privacy settings - just accept defaults and click Accept
+    delay(OOBE_SCREEN_DELAY * 2);  // Extra wait for privacy screen
+    showStatus("OOBE", "Privacy...");
+    
+    // Tab through privacy toggles and click Accept
+    for (int i = 0; i < 6; i++) {
+        pressKey(KEY_TAB);
+        delay(100);
+    }
+    pressKey(KEY_RETURN);  // Accept
+    
+    DEBUG_PRINTLN(F("OOBE setup complete!"));
+}
+
+* ============================================ */
+
+/* ============================================
+ * WINDOWS 10 INSTALLER PAYLOAD - DISABLED
+ * Uncomment this section to enable Windows 10 installation functionality
+ * ============================================
+// ============================================
 // Main Payload Execution
 // ============================================
 void executePayload() {
@@ -323,29 +437,34 @@ void executePayload() {
     
     // PHASE 1: Boot Menu
     // NO DELAY - Start immediately to catch BIOS POST
-    showStatus("PHASE 1/5", "Boot Menu...");
+    showStatus("PHASE 1/6", "Boot Menu...");
     delay(300);
     executeBootMenuPhase();
     
     // PHASE 2: Wait for Windows Setup to load
-    showStatus("PHASE 2/5", "Waiting...");
+    showStatus("PHASE 2/6", "Waiting...");
     delay(300);
     waitForWindowsSetup();
     
     // PHASE 3: Navigate Windows Setup screens
-    showStatus("PHASE 3/5", "Win Setup Nav");
+    showStatus("PHASE 3/6", "Win Setup Nav");
     delay(300);
     executeWindowsSetup();
     
     // PHASE 4: Delete all partitions
-    showStatus("PHASE 4/5", "Wiping Disk...");
+    showStatus("PHASE 4/6", "Wiping Disk...");
     delay(300);
     executePartitionWipe();
     
     // PHASE 5: Start installation
-    showStatus("PHASE 5/5", "Installing...");
+    showStatus("PHASE 5/6", "Installing...");
     delay(300);
     startInstallation();
+    
+    // PHASE 6: OOBE Setup (after Windows installs)
+    showStatus("PHASE 6/6", "OOBE Setup...");
+    delay(300);
+    executeOOBESetup();
     
     // COMPLETE!
     showComplete();
@@ -358,6 +477,7 @@ void executePayload() {
     
     payloadExecuted = true;
 }
+* ============================================ */
 
 // ============================================
 // I2C Scanner Mode
@@ -468,11 +588,586 @@ void runScannerMode() {
 }
 
 // ============================================
+// BIOS Admin Password Removal Payload
+// Dell BIOS Navigation sequence (user-specified)
+// ============================================
+
+// Extra down count for BIOS folder selection (adjustable via safety wire)
+int extraDownCount = 0;
+
+// Function to check for extra DOWN input during adjustment window
+// Touch D7 to GND during the window to add extra DOWNs
+void checkExtraDownsWindow() {
+    const unsigned long ADJUSTMENT_WINDOW = 10000;  // 10 second window
+    const unsigned long TOUCH_COOLDOWN = 2000;      // 2 second cooldown between touches
+    unsigned long windowStart = millis();
+    unsigned long lastTouchTime = 0;
+    bool wasConnected = false;  // Track previous state for edge detection
+    
+    extraDownCount = 0;
+    
+    if (lcdAvailable) {
+        LiquidCrystal_I2C& lcd = getLCD();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("ADJUST: Touch D7");
+        lcd.setCursor(0, 1);
+        lcd.print("+0 DOWNs    10s");
+    }
+    DEBUG_PRINTLN(F("Adjustment window open - touch D7 to GND for extra DOWNs"));
+    
+    while (millis() - windowStart < ADJUSTMENT_WINDOW) {
+        unsigned long elapsed = millis() - windowStart;
+        int remaining = (ADJUSTMENT_WINDOW - elapsed) / 1000;
+        
+        // Check if D7 is touched to GND (LOW = connected)
+        bool isConnected = (digitalRead(SAFETY_PIN_1) == LOW);
+        
+        // Edge detection: only register when wire transitions from disconnected to connected
+        if (isConnected && !wasConnected) {
+            // Check cooldown
+            if (millis() - lastTouchTime >= TOUCH_COOLDOWN) {
+                extraDownCount++;
+                lastTouchTime = millis();
+                
+                DEBUG_PRINT(F("Extra DOWN registered! Count: "));
+                DEBUG_PRINTLN(extraDownCount);
+                
+                // Visual feedback
+                ledOn();
+                if (lcdAvailable) {
+                    LiquidCrystal_I2C& lcd = getLCD();
+                    lcd.setCursor(0, 1);
+                    lcd.print("+");
+                    lcd.print(extraDownCount);
+                    lcd.print(" DOWNs   ");
+                }
+                delay(100);
+                ledOff();
+            }
+        }
+        wasConnected = isConnected;
+        
+        // Update countdown on LCD
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            lcd.setCursor(12, 1);
+            if (remaining < 10) lcd.print(" ");
+            lcd.print(remaining);
+            lcd.print("s");
+            
+            // Show cooldown indicator if in cooldown
+            if (millis() - lastTouchTime < TOUCH_COOLDOWN && lastTouchTime > 0) {
+                lcd.setCursor(9, 1);
+                lcd.print("CD");
+            } else {
+                lcd.setCursor(9, 1);
+                lcd.print("  ");
+            }
+        }
+        
+        delay(50);  // Poll every 50ms
+    }
+    
+    // Window complete - show final count
+    if (lcdAvailable) {
+        LiquidCrystal_I2C& lcd = getLCD();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("ADJUSTMENT DONE");
+        lcd.setCursor(0, 1);
+        lcd.print("Total: +");
+        lcd.print(extraDownCount);
+        lcd.print(" DOWNs");
+    }
+    DEBUG_PRINT(F("Adjustment complete. Extra DOWNs: "));
+    DEBUG_PRINTLN(extraDownCount);
+    delay(1500);
+}
+
+void executeBIOSPasswordRemoval() {
+    DEBUG_PRINTLN(F("\n========================================"));
+    DEBUG_PRINTLN(F("  DELL BIOS PASSWORD REMOVAL STARTING"));
+    DEBUG_PRINTLN(F("========================================\n"));
+    
+    // Initialize keyboard HID immediately
+    initKeyboard();
+    
+    // ==========================================
+    // PHASE 0: Adjustment Window for extra DOWNs
+    // Touch D7 to GND to add extra DOWN presses
+    // ==========================================
+    checkExtraDownsWindow();
+    
+    // ==========================================
+    // PHASE 1: Spam F2 to enter BIOS Setup
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("ENTERING BIOS", "Spamming F2...");
+    }
+    DEBUG_PRINTLN(F("Spamming F2 to enter BIOS Setup..."));
+    
+    unsigned long startTime = millis();
+    int keyCount = 0;
+    
+    // Spam F2 for 10 seconds to catch BIOS POST
+    while (millis() - startTime < BOOT_SPAM_DURATION) {
+        pressKey(KEY_F2);  // F2 for Dell BIOS Setup
+        keyCount++;
+        
+        // Update LCD with countdown if available
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            int remaining = (BOOT_SPAM_DURATION - (millis() - startTime)) / 1000;
+            lcd.setCursor(13, 1);
+            if (remaining < 10) lcd.print(" ");
+            lcd.print(remaining);
+            lcd.print("s");
+        }
+    }
+    
+    DEBUG_PRINT(F("Sent F2 "));
+    DEBUG_PRINT(keyCount);
+    DEBUG_PRINTLN(F(" times"));
+    
+    // ==========================================
+    // PHASE 2: Wait for BIOS to fully load
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("BIOS LOADING", "Waiting...");
+    }
+    DEBUG_PRINTLN(F("Waiting for BIOS to load..."));
+    
+    // Countdown for 5 seconds
+    for (int i = 5; i > 0; i--) {
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            lcd.setCursor(14, 1);
+            lcd.print(i);
+            lcd.print("s");
+        }
+        delay(1000);
+    }
+    
+    // ==========================================
+    // PHASE 3: Navigate BIOS (user-specified sequence)
+    // Down 6 + extraDownCount, Enter, Down 1, Tab, Enter
+    // ==========================================
+    int totalDowns = 6 + extraDownCount;
+    
+    if (lcdAvailable) {
+        LiquidCrystal_I2C& lcd = getLCD();
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("NAVIGATING BIOS");
+        lcd.setCursor(0, 1);
+        lcd.print("Down x");
+        lcd.print(totalDowns);
+        lcd.print("...");
+    }
+    DEBUG_PRINT(F("Navigating BIOS - Down x"));
+    DEBUG_PRINTLN(totalDowns);
+    
+    // Down (6 + extra) times
+    for (int i = 0; i < totalDowns; i++) {
+        pressKey(KEY_DOWN_ARROW);
+        delay(300);
+        
+        // Update LCD with progress
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            lcd.setCursor(11, 1);
+            lcd.print(i + 1);
+            lcd.print("/");
+            lcd.print(totalDowns);
+        }
+    }
+    delay(500);
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(500);
+    
+    // Down once
+    pressKey(KEY_DOWN_ARROW);
+    delay(300);
+    
+    // Tab
+    pressKey(KEY_TAB);
+    delay(300);
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(500);
+    
+    // ==========================================
+    // PHASE 4: Enter OLD password
+    // Type ls3gt1, Tab, Enter
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("OLD PASSWORD", "Typing...");
+    }
+    DEBUG_PRINTLN(F("Entering old password: ls3gt1"));
+    
+    typeString("ls3gt1");
+    delay(200);
+    
+    // Tab
+    pressKey(KEY_TAB);
+    delay(300);
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(500);
+    
+    // ==========================================
+    // PHASE 5: Confirm/Clear password
+    // Tab, ls3gt1, Tab 3 times, Enter
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("CONFIRMING", "Password...");
+    }
+    DEBUG_PRINTLN(F("Confirming password change..."));
+    
+    // Tab
+    pressKey(KEY_TAB);
+    delay(300);
+    
+    // Type ls3gt1 again
+    typeString("ls3gt1");
+    delay(200);
+    
+    // Tab 3 times
+    for (int i = 0; i < 3; i++) {
+        pressKey(KEY_TAB);
+        delay(300);
+    }
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(500);
+    
+    // ==========================================
+    // PHASE 6: Final confirmation
+    // Tab 2 times, Enter
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("SAVING", "Confirming...");
+    }
+    DEBUG_PRINTLN(F("Final confirmation..."));
+    
+    // Tab 2 times
+    for (int i = 0; i < 2; i++) {
+        pressKey(KEY_TAB);
+        delay(300);
+    }
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(500);
+    
+    // ==========================================
+    // COMPLETE
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("PASS REMOVED!", "Rebooting...");
+    }
+    
+    DEBUG_PRINTLN(F("\n========================================"));
+    DEBUG_PRINTLN(F("  BIOS PASSWORD REMOVAL COMPLETE"));
+    DEBUG_PRINTLN(F("  System should reboot with no password"));
+    DEBUG_PRINTLN(F("========================================\n"));
+    
+    payloadExecuted = true;
+}
+
+// ============================================
+// Windows 10 Clean Install Payload
+// Sequence: F12(10s) -> Down5 -> Enter -> Wait10s -> Tab3 -> Enter2 -> Wait15s -> Space -> Enter -> Down -> Enter -> Delete partitions
+// ============================================
+void executeWindows10Install() {
+    DEBUG_PRINTLN(F("\n========================================"));
+    DEBUG_PRINTLN(F("  WINDOWS 10 CLEAN INSTALL STARTING"));
+    DEBUG_PRINTLN(F("========================================\n"));
+    
+    // Initialize keyboard HID immediately
+    initKeyboard();
+    
+    // ==========================================
+    // STEP 1: Spam F12 for 10 seconds
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("BOOT MENU", "Spamming F12...");
+    }
+    DEBUG_PRINTLN(F("Spamming F12 for 10 seconds..."));
+    
+    unsigned long startTime = millis();
+    int keyCount = 0;
+    
+    while (millis() - startTime < BOOT_SPAM_DURATION) {
+        pressKey(KEY_F12);
+        keyCount++;
+        
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            int remaining = (BOOT_SPAM_DURATION - (millis() - startTime)) / 1000;
+            lcd.setCursor(13, 1);
+            if (remaining < 10) lcd.print(" ");
+            lcd.print(remaining);
+            lcd.print("s");
+        }
+    }
+    
+    DEBUG_PRINT(F("Sent F12 "));
+    DEBUG_PRINT(keyCount);
+    DEBUG_PRINTLN(F(" times"));
+    
+    // ==========================================
+    // STEP 2: Down 5 times
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("BOOT MENU", "Down 5...");
+    }
+    DEBUG_PRINTLN(F("Down 5 times..."));
+    
+    for (int i = 0; i < 5; i++) {
+        pressKey(KEY_DOWN_ARROW);
+        delay(200);
+    }
+    
+    // ==========================================
+    // STEP 3: Enter
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("BOOT MENU", "Enter");
+    }
+    DEBUG_PRINTLN(F("Enter..."));
+    pressKey(KEY_RETURN);
+    
+    // ==========================================
+    // STEP 4: Wait 30 seconds
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("LOADING", "Win Setup...");
+    }
+    DEBUG_PRINTLN(F("Waiting 30 seconds..."));
+    
+    for (int i = 30; i > 0; i--) {
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            lcd.setCursor(13, 1);
+            if (i < 10) lcd.print(" ");
+            lcd.print(i);
+            lcd.print("s");
+        }
+        delay(1000);
+    }
+    
+    // ==========================================
+    // STEP 5: Tab 3 times
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("SETUP", "Tab 3...");
+    }
+    DEBUG_PRINTLN(F("Tab 3 times..."));
+    
+    for (int i = 0; i < 3; i++) {
+        pressKey(KEY_TAB);
+        delay(200);
+    }
+    
+    // ==========================================
+    // STEP 6: Enter 2 times
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("SETUP", "Enter 2...");
+    }
+    DEBUG_PRINTLN(F("Enter 2 times..."));
+    
+    pressKey(KEY_RETURN);
+    delay(300);
+    pressKey(KEY_RETURN);
+    
+    // ==========================================
+    // STEP 7: Wait 30 seconds
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("SETUP", "Waiting...");
+    }
+    DEBUG_PRINTLN(F("Waiting 30 seconds..."));
+    
+    for (int i = 30; i > 0; i--) {
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            lcd.setCursor(13, 1);
+            if (i < 10) lcd.print(" ");
+            lcd.print(i);
+            lcd.print("s");
+        }
+        delay(1000);
+    }
+    
+    // ==========================================
+    // STEP 8: Space, Enter, Down, Enter
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("SETUP", "License...");
+    }
+    DEBUG_PRINTLN(F("Space, Enter, Down, Enter..."));
+    
+    // Space
+    pressKey(' ');
+    delay(300);
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(300);
+    
+    // Down
+    pressKey(KEY_DOWN_ARROW);
+    delay(300);
+    
+    // Enter
+    pressKey(KEY_RETURN);
+    delay(2000);  // Wait for partition screen to load
+    
+    // ==========================================
+    // STEP 9: Delete ALL Partitions - OPTIMIZED
+    // Strategy: Select partition, Tab to Delete button, Enter, confirm
+    // Repeat from top to ensure all partitions are deleted
+    // Uses multiple passes to handle partition reordering after deletion
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("WIPING DISK", "Analyzing...");
+    }
+    DEBUG_PRINTLN(F("Starting optimized partition deletion..."));
+    
+    delay(2000);  // Extra wait for partition list to fully populate
+    
+    // Perform 3 passes to ensure all partitions are deleted
+    // (partitions renumber after deletion, so we need multiple passes)
+    for (int pass = 1; pass <= 3; pass++) {
+        if (lcdAvailable) {
+            LiquidCrystal_I2C& lcd = getLCD();
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("WIPE PASS ");
+            lcd.print(pass);
+            lcd.print("/3");
+            lcd.setCursor(0, 1);
+            lcd.print("Deleting...");
+        }
+        DEBUG_PRINT(F("Deletion pass "));
+        DEBUG_PRINTLN(pass);
+        
+        // Start from the top of the list each pass
+        // Press UP multiple times to ensure we're at the top
+        for (int i = 0; i < 10; i++) {
+            pressKey(KEY_UP_ARROW);
+            delay(100);
+        }
+        delay(300);
+        
+        // Now go DOWN once to select first actual partition (skip Drive header)
+        pressKey(KEY_DOWN_ARROW);
+        delay(300);
+        
+        // Delete up to 10 partitions per pass
+        for (int partition = 0; partition < 10; partition++) {
+            // Update LCD with progress
+            if (lcdAvailable) {
+                LiquidCrystal_I2C& lcd = getLCD();
+                lcd.setCursor(0, 1);
+                lcd.print("P");
+                lcd.print(partition + 1);
+                lcd.print(" ");
+            }
+            
+            DEBUG_PRINT(F("  Attempting partition #"));
+            DEBUG_PRINTLN(partition + 1);
+            
+            // METHOD 1: Try DELETE key first (direct shortcut)
+            pressKey(KEY_DELETE);
+            delay(500);
+            
+            // Check for confirmation dialog - Tab to Yes and Enter
+            pressKey(KEY_TAB);  // Move to Yes button
+            delay(100);
+            pressKey(KEY_RETURN);  // Confirm
+            delay(800);
+            
+            // METHOD 2: Try ALT+D as backup (some BIOS/Windows versions)
+            pressCombo(KEY_LEFT_ALT, 'd');
+            delay(400);
+            
+            // Confirm deletion if dialog appeared
+            pressKey(KEY_TAB);
+            delay(100);
+            pressKey(KEY_RETURN);
+            delay(600);
+            
+            // METHOD 3: Try Left arrow + Enter for dialogs that default to No
+            pressKey(KEY_LEFT_ARROW);
+            delay(100);
+            pressKey(KEY_RETURN);
+            delay(500);
+            
+            // Move to next partition (will skip if current was deleted)
+            pressKey(KEY_DOWN_ARROW);
+            delay(300);
+        }
+        
+        delay(1000);  // Pause between passes
+    }
+    
+    // Final cleanup - try to select unallocated space
+    if (lcdAvailable) {
+        showStatus("FINALIZING", "Selecting...");
+    }
+    DEBUG_PRINTLN(F("Selecting unallocated space..."));
+    
+    // Go back to top and select first item (should be unallocated space now)
+    for (int i = 0; i < 10; i++) {
+        pressKey(KEY_UP_ARROW);
+        delay(100);
+    }
+    pressKey(KEY_DOWN_ARROW);  // Select first partition/unallocated space
+    delay(300);
+    
+    // Tab to Next button and press Enter
+    for (int i = 0; i < 6; i++) {
+        pressKey(KEY_TAB);
+        delay(150);
+    }
+    pressKey(KEY_RETURN);
+    delay(1000);
+    
+    // Press Enter again in case of confirmation
+    pressKey(KEY_RETURN);
+    delay(500);
+    
+    // ==========================================
+    // COMPLETE
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("DONE!", "Install started");
+    }
+    
+    DEBUG_PRINTLN(F("\n========================================"));
+    DEBUG_PRINTLN(F("  WINDOWS 10 PARTITION WIPE COMPLETE"));
+    DEBUG_PRINTLN(F("  Installation should be starting..."));
+    DEBUG_PRINTLN(F("========================================\n"));
+    
+    payloadExecuted = true;
+}
+
+// ============================================
 // Setup
 // ============================================
 void setup() {
-    // Initialize pins FIRST
-    pinMode(ARM_BUTTON_PIN, INPUT_PULLUP);
+    // Initialize pins FIRST - including both safety wire pins
+    pinMode(SAFETY_PIN_1, INPUT_PULLUP);  // D7 - primary safety
+    pinMode(SAFETY_PIN_2, INPUT_PULLUP);  // D10 - mode select
     pinMode(LED_PIN, OUTPUT);
     ledOff();
     
@@ -481,7 +1176,9 @@ void setup() {
     delay(100);  // Brief delay for serial
     
     Serial.println(F("\n===================================="));
-    Serial.println(F(" WINDOWS AUTO-WIPE DEVICE"));
+    Serial.println(F(" BIOS/WIN10 MULTI-TOOL DEVICE"));
+    Serial.println(F(" D7 removed = BIOS password"));
+    Serial.println(F(" D7+D10 removed = Win10 install"));
     #if DEMO_MODE
     Serial.println(F("    *** DEMO MODE ACTIVE ***"));
     Serial.println(F("  (No keystrokes will be sent)"));
@@ -547,30 +1244,101 @@ void setup() {
     Serial.println(F("  LCD: OK"));
     
     // Show startup message on LCD
-    showStatus("AUTO-WIPE v1.0", "Checking HW...");
-    delay(500);
+    showStatus("MULTI-TOOL", "Checking...");
+    delay(300);
     
-    // Check 2: Button wiring
-    ErrorCode buttonErr = checkSwitchWiring();
-    if (buttonErr != ERR_NONE) {
-        Serial.println(F("  Button: FLOATING!"));
-        haltWithError(buttonErr);  // Never returns
+    // ==========================================
+    // SAFETY WIRE CHECK
+    // ==========================================
+    // D7 to GND: Primary safety (must remove to execute anything)
+    // D10 to GND: Mode select (remove for Win10, keep for BIOS password)
+    
+    Serial.println(F("Checking safety wires..."));
+    Serial.print(F("  D7 (primary): "));
+    Serial.println(isSafety1Off() ? F("REMOVED (armed)") : F("connected (safe)"));
+    Serial.print(F("  D10 (mode): "));
+    Serial.println(isSafety2Off() ? F("REMOVED (Win10)") : F("connected (BIOS)"));
+    
+    if (!isSafetyOff()) {
+        // Primary safety wire is connected - DO NOT EXECUTE
+        Serial.println(F("\n  PRIMARY SAFETY ON - waiting..."));
+        Serial.println(F("  Remove D7 wire to arm device."));
+        Serial.println(F("  Also remove D10 for Win10 install mode."));
+        
+        if (lcdAvailable) {
+            showStatus("SAFETY ON", "Remove D7 wire");
+        }
+        
+        // Slow blink to indicate safe mode - wait until D7 removed
+        while (true) {
+            ledOn();
+            delay(1000);
+            ledOff();
+            delay(1000);
+            
+            // Check if primary wire was removed
+            if (isSafetyOff()) {
+                Serial.println(F("  D7 removed - ARMING!"));
+                break;
+            }
+        }
     }
-    Serial.println(F("  Button: OK"));
+    
+    // Primary safety is OFF - check mode and proceed
+    bool win10Mode = isWin10Mode();
+    
+    Serial.println(F("\n  PRIMARY SAFETY OFF - Device armed!"));
+    Serial.print(F("  Mode: "));
+    Serial.println(win10Mode ? F("WINDOWS 10 INSTALL") : F("BIOS PASSWORD REMOVAL"));
     
     // Update LCD with hardware check result
     #if DEMO_MODE
     showStatus("** DEMO MODE **", "No keys sent!");
     delay(1500);
     #endif
-    showStatus("HW CHECK: OK", "Ready!");
+    
+    if (win10Mode) {
+        showStatus("MODE: WIN10", "Install ready");
+    } else {
+        showStatus("MODE: BIOS", "Password ready");
+    }
     delay(500);
     
     Serial.println(F("Hardware checks passed!\n"));
     
     // ==========================================
-    // READY - WAIT FOR BUTTON PRESS
+    // EXECUTE BASED ON MODE
     // ==========================================
+    if (lcdAvailable) {
+        showStatus("!! ARMED !!", "Executing...");
+    }
+    blinkLED(3, 100);  // Quick blink to indicate starting
+    
+    if (win10Mode) {
+        // D7 AND D10 removed - Windows 10 Install mode
+        Serial.println(F("Executing Windows 10 clean install..."));
+        executeWindows10Install();
+        
+        if (lcdAvailable) {
+            showStatus("DONE!", "Win10 wipe done");
+        }
+    } else {
+        // Only D7 removed - BIOS Password Removal mode
+        Serial.println(F("Executing BIOS password removal..."));
+        executeBIOSPasswordRemoval();
+        
+        if (lcdAvailable) {
+            showStatus("COMPLETE!", "Password removed");
+        }
+    }
+    
+    ledOn();  // Solid LED = complete
+    
+    /* ==========================================
+     * WINDOWS 10 INSTALLER CODE - DISABLED
+     * Uncomment below and comment out executeBIOSPasswordRemoval()
+     * if you want to use the Windows installer functionality
+     * ==========================================
     #if DEMO_MODE
     showStatus("DEMO - READY", "Press btn 3s...");
     #else
@@ -618,6 +1386,7 @@ void setup() {
         
         delay(10);
     }
+    * ========================================== */
 }
 
 // ============================================

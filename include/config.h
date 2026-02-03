@@ -21,7 +21,8 @@
 // ===========================================
 // Hardware Pins
 // ===========================================
-#define ARM_BUTTON_PIN      7       // Arm button (INPUT_PULLUP, press to GND)
+#define ARM_BUTTON_PIN      7       // Safety wire 1 (INPUT_PULLUP, connect to GND)
+#define MODE_SELECT_PIN     10      // Safety wire 2 - mode select (INPUT_PULLUP)
 #define LED_PIN             13      // Status LED
 
 // ===========================================
@@ -57,6 +58,8 @@
 #define WIN_SETUP_WAIT      45          // Seconds to wait for Windows Setup
 #define PARTITION_DELAY     1500        // Delay after partition operations
 #define DELETE_ATTEMPTS     10          // Max partition delete attempts
+#define OOBE_WAIT_TIME      1800        // Seconds to wait for OOBE (30 min for install)
+#define OOBE_SCREEN_DELAY   3000        // Delay between OOBE screens
 
 // ===========================================
 // Serial Configuration
