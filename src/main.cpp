@@ -592,59 +592,77 @@ void runScannerMode() {
 // Dell BIOS Navigation sequence (user-specified)
 // ============================================
 
-// Extra down count for BIOS folder selection (adjustable via safety wire)
-int extraDownCount = 0;
-
-// Function to check for extra DOWN input during adjustment window
-// Touch D7 to GND during the window to add extra DOWNs
-void checkExtraDownsWindow() {
-    const unsigned long ADJUSTMENT_WINDOW = 10000;  // 10 second window
-    const unsigned long TOUCH_COOLDOWN = 2000;      // 2 second cooldown between touches
-    unsigned long windowStart = millis();
-    unsigned long lastTouchTime = 0;
-    bool wasConnected = false;  // Track previous state for edge detection
+// Dynamic DOWN adjustment function
+// Waits for initial window, then adds DOWNs when D7 is touched
+// Each touch: press DOWN once and wait another 5 seconds
+// If no touch for the wait period, proceed
+// Returns total number of extra DOWNs pressed
+int dynamicDownAdjustment(int initialWaitSec, int touchWaitSec, const char* title) {
+    const unsigned long INITIAL_WAIT = initialWaitSec * 1000UL;  // Initial wait (10 sec)
+    const unsigned long TOUCH_WAIT = touchWaitSec * 1000UL;      // Wait after each touch (5 sec)
     
-    extraDownCount = 0;
+    unsigned long windowStart = millis();
+    unsigned long currentWait = INITIAL_WAIT;
+    int extraDowns = 0;
+    bool wasConnected = false;
     
     if (lcdAvailable) {
         LiquidCrystal_I2C& lcd = getLCD();
         lcd.clear();
         lcd.setCursor(0, 0);
-        lcd.print("ADJUST: Touch D7");
+        lcd.print(title);
         lcd.setCursor(0, 1);
-        lcd.print("+0 DOWNs    10s");
+        lcd.print("Touch D7    ");
+        lcd.print(initialWaitSec);
+        lcd.print("s");
     }
-    DEBUG_PRINTLN(F("Adjustment window open - touch D7 to GND for extra DOWNs"));
+    DEBUG_PRINT(F("Dynamic adjustment window: "));
+    DEBUG_PRINTLN(title);
     
-    while (millis() - windowStart < ADJUSTMENT_WINDOW) {
+    while (true) {
         unsigned long elapsed = millis() - windowStart;
-        int remaining = (ADJUSTMENT_WINDOW - elapsed) / 1000;
+        int remaining = (currentWait - elapsed) / 1000;
+        
+        // Time's up - no touch detected in time
+        if (elapsed >= currentWait) {
+            DEBUG_PRINTLN(F("Adjustment window closed - proceeding"));
+            break;
+        }
         
         // Check if D7 is touched to GND (LOW = connected)
         bool isConnected = (digitalRead(SAFETY_PIN_1) == LOW);
         
-        // Edge detection: only register when wire transitions from disconnected to connected
+        // Edge detection: register when wire connects to GND
         if (isConnected && !wasConnected) {
-            // Check cooldown
-            if (millis() - lastTouchTime >= TOUCH_COOLDOWN) {
-                extraDownCount++;
-                lastTouchTime = millis();
-                
-                DEBUG_PRINT(F("Extra DOWN registered! Count: "));
-                DEBUG_PRINTLN(extraDownCount);
-                
-                // Visual feedback
-                ledOn();
-                if (lcdAvailable) {
-                    LiquidCrystal_I2C& lcd = getLCD();
-                    lcd.setCursor(0, 1);
-                    lcd.print("+");
-                    lcd.print(extraDownCount);
-                    lcd.print(" DOWNs   ");
-                }
-                delay(100);
-                ledOff();
+            // Touch detected! Press DOWN and reset timer
+            extraDowns++;
+            
+            DEBUG_PRINT(F("Touch detected! Pressing DOWN #"));
+            DEBUG_PRINTLN(extraDowns);
+            
+            // Visual feedback
+            ledOn();
+            
+            // Press DOWN arrow
+            pressKey(KEY_DOWN_ARROW);
+            delay(200);
+            
+            ledOff();
+            
+            // Update LCD
+            if (lcdAvailable) {
+                LiquidCrystal_I2C& lcd = getLCD();
+                lcd.setCursor(0, 1);
+                lcd.print("+");
+                lcd.print(extraDowns);
+                lcd.print(" DOWN   ");
+                lcd.print(touchWaitSec);
+                lcd.print("s");
             }
+            
+            // Reset timer for another wait period
+            windowStart = millis();
+            currentWait = TOUCH_WAIT;
         }
         wasConnected = isConnected;
         
@@ -655,34 +673,24 @@ void checkExtraDownsWindow() {
             if (remaining < 10) lcd.print(" ");
             lcd.print(remaining);
             lcd.print("s");
-            
-            // Show cooldown indicator if in cooldown
-            if (millis() - lastTouchTime < TOUCH_COOLDOWN && lastTouchTime > 0) {
-                lcd.setCursor(9, 1);
-                lcd.print("CD");
-            } else {
-                lcd.setCursor(9, 1);
-                lcd.print("  ");
-            }
         }
         
         delay(50);  // Poll every 50ms
     }
     
-    // Window complete - show final count
+    // Window complete - show result briefly
     if (lcdAvailable) {
         LiquidCrystal_I2C& lcd = getLCD();
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("ADJUSTMENT DONE");
         lcd.setCursor(0, 1);
-        lcd.print("Total: +");
-        lcd.print(extraDownCount);
-        lcd.print(" DOWNs");
+        lcd.print("Done: +");
+        lcd.print(extraDowns);
+        lcd.print(" DOWNs  ");
     }
-    DEBUG_PRINT(F("Adjustment complete. Extra DOWNs: "));
-    DEBUG_PRINTLN(extraDownCount);
-    delay(1500);
+    DEBUG_PRINT(F("Dynamic adjustment done. Extra DOWNs: "));
+    DEBUG_PRINTLN(extraDowns);
+    delay(500);
+    
+    return extraDowns;
 }
 
 void executeBIOSPasswordRemoval() {
@@ -692,12 +700,6 @@ void executeBIOSPasswordRemoval() {
     
     // Initialize keyboard HID immediately
     initKeyboard();
-    
-    // ==========================================
-    // PHASE 0: Adjustment Window for extra DOWNs
-    // Touch D7 to GND to add extra DOWN presses
-    // ==========================================
-    checkExtraDownsWindow();
     
     // ==========================================
     // PHASE 1: Spam F2 to enter BIOS Setup
@@ -750,39 +752,41 @@ void executeBIOSPasswordRemoval() {
     }
     
     // ==========================================
-    // PHASE 3: Navigate BIOS (user-specified sequence)
-    // Down 6 + extraDownCount, Enter, Down 1, Tab, Enter
+    // PHASE 3: Initial navigation - Down 5 times
     // ==========================================
-    int totalDowns = 6 + extraDownCount;
-    
     if (lcdAvailable) {
-        LiquidCrystal_I2C& lcd = getLCD();
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("NAVIGATING BIOS");
-        lcd.setCursor(0, 1);
-        lcd.print("Down x");
-        lcd.print(totalDowns);
-        lcd.print("...");
+        showStatus("NAVIGATING", "Down 5...");
     }
-    DEBUG_PRINT(F("Navigating BIOS - Down x"));
-    DEBUG_PRINTLN(totalDowns);
+    DEBUG_PRINTLN(F("Navigating BIOS - Down 5 times"));
     
-    // Down (6 + extra) times
-    for (int i = 0; i < totalDowns; i++) {
+    for (int i = 0; i < 5; i++) {
         pressKey(KEY_DOWN_ARROW);
         delay(300);
         
-        // Update LCD with progress
         if (lcdAvailable) {
             LiquidCrystal_I2C& lcd = getLCD();
             lcd.setCursor(11, 1);
             lcd.print(i + 1);
-            lcd.print("/");
-            lcd.print(totalDowns);
+            lcd.print("/5");
         }
     }
-    delay(500);
+    delay(300);
+    
+    // ==========================================
+    // PHASE 4: Dynamic adjustment window
+    // Wait 10s, touch D7 to add DOWN + 5s more
+    // ==========================================
+    int extraDowns = dynamicDownAdjustment(10, 5, "BIOS ADJUST");
+    DEBUG_PRINT(F("Total extra DOWNs from adjustment: "));
+    DEBUG_PRINTLN(extraDowns);
+    
+    // ==========================================
+    // PHASE 5: Continue BIOS navigation
+    // Enter, Down 1, Tab, Enter
+    // ==========================================
+    if (lcdAvailable) {
+        showStatus("BIOS NAV", "Selecting...");
+    }
     
     // Enter
     pressKey(KEY_RETURN);
@@ -801,7 +805,7 @@ void executeBIOSPasswordRemoval() {
     delay(500);
     
     // ==========================================
-    // PHASE 4: Enter OLD password
+    // PHASE 6: Enter OLD password
     // Type ls3gt1, Tab, Enter
     // ==========================================
     if (lcdAvailable) {
@@ -923,25 +927,32 @@ void executeWindows10Install() {
     DEBUG_PRINTLN(F(" times"));
     
     // ==========================================
-    // STEP 2: Down 5 times
+    // STEP 2: Down 1 time (initial position)
     // ==========================================
     if (lcdAvailable) {
-        showStatus("BOOT MENU", "Down 5...");
+        showStatus("BOOT MENU", "Down 1...");
     }
-    DEBUG_PRINTLN(F("Down 5 times..."));
+    DEBUG_PRINTLN(F("Down 1 time..."));
     
-    for (int i = 0; i < 5; i++) {
-        pressKey(KEY_DOWN_ARROW);
-        delay(200);
-    }
+    pressKey(KEY_DOWN_ARROW);
+    delay(300);
     
     // ==========================================
-    // STEP 3: Enter
+    // STEP 3: Dynamic adjustment window for USB
+    // Wait 10s, touch D7 to add DOWN + 5s more
+    // USB position varies so this allows dynamic selection
+    // ==========================================
+    int extraDowns = dynamicDownAdjustment(10, 5, "USB ADJUST");
+    DEBUG_PRINT(F("Total extra DOWNs from adjustment: "));
+    DEBUG_PRINTLN(extraDowns);
+    
+    // ==========================================
+    // STEP 4: Enter to select boot device
     // ==========================================
     if (lcdAvailable) {
-        showStatus("BOOT MENU", "Enter");
+        showStatus("BOOT MENU", "Selecting...");
     }
-    DEBUG_PRINTLN(F("Enter..."));
+    DEBUG_PRINTLN(F("Enter to select..."));
     pressKey(KEY_RETURN);
     
     // ==========================================
@@ -1032,117 +1043,148 @@ void executeWindows10Install() {
     delay(2000);  // Wait for partition screen to load
     
     // ==========================================
-    // STEP 9: Delete ALL Partitions - OPTIMIZED
-    // Strategy: Select partition, Tab to Delete button, Enter, confirm
-    // Repeat from top to ensure all partitions are deleted
-    // Uses multiple passes to handle partition reordering after deletion
+    // STEP 9: Delete ALL Partitions - SMART ALGORITHM
+    // Windows Setup: Select partition, RIGHT to Delete link, Enter, confirm
+    // Strategy: Sweep up and down through the list, trying to delete at each position
     // ==========================================
     if (lcdAvailable) {
-        showStatus("WIPING DISK", "Analyzing...");
+        showStatus("WIPING DISK", "Smart delete...");
     }
-    DEBUG_PRINTLN(F("Starting optimized partition deletion..."));
+    DEBUG_PRINTLN(F("Starting smart partition deletion..."));
     
-    delay(2000);  // Extra wait for partition list to fully populate
+    delay(2000);  // Wait for partition list to fully populate
     
-    // Perform 3 passes to ensure all partitions are deleted
-    // (partitions renumber after deletion, so we need multiple passes)
-    for (int pass = 1; pass <= 3; pass++) {
+    const int MAX_SWEEPS = 4;         // Number of up/down sweeps
+    int totalAttempts = 0;
+    
+    // First, go to top of list
+    for (int i = 0; i < 10; i++) {
+        pressKey(KEY_UP_ARROW);
+        delay(80);
+    }
+    delay(200);
+    
+    // Skip the drive header - move down once
+    pressKey(KEY_DOWN_ARROW);
+    delay(200);
+    
+    // Perform sweeps: down then up, repeat
+    for (int sweep = 0; sweep < MAX_SWEEPS; sweep++) {
+        bool goingDown = (sweep % 2 == 0);  // Alternate direction each sweep
+        
         if (lcdAvailable) {
             LiquidCrystal_I2C& lcd = getLCD();
             lcd.clear();
             lcd.setCursor(0, 0);
-            lcd.print("WIPE PASS ");
-            lcd.print(pass);
-            lcd.print("/3");
+            lcd.print("SWEEP ");
+            lcd.print(sweep + 1);
+            lcd.print("/");
+            lcd.print(MAX_SWEEPS);
+            lcd.print(goingDown ? " DN" : " UP");
             lcd.setCursor(0, 1);
             lcd.print("Deleting...");
         }
-        DEBUG_PRINT(F("Deletion pass "));
-        DEBUG_PRINTLN(pass);
         
-        // Start from the top of the list each pass
-        // Press UP multiple times to ensure we're at the top
-        for (int i = 0; i < 10; i++) {
-            pressKey(KEY_UP_ARROW);
-            delay(100);
-        }
-        delay(300);
+        DEBUG_PRINT(F("Sweep "));
+        DEBUG_PRINT(sweep + 1);
+        DEBUG_PRINTLN(goingDown ? F(" going DOWN") : F(" going UP"));
         
-        // Now go DOWN once to select first actual partition (skip Drive header)
-        pressKey(KEY_DOWN_ARROW);
-        delay(300);
-        
-        // Delete up to 10 partitions per pass
-        for (int partition = 0; partition < 10; partition++) {
-            // Update LCD with progress
+        // Try to delete at each position in this sweep
+        for (int pos = 0; pos < 8; pos++) {
+            totalAttempts++;
+            
+            // Update LCD with position
             if (lcdAvailable) {
                 LiquidCrystal_I2C& lcd = getLCD();
-                lcd.setCursor(0, 1);
+                lcd.setCursor(11, 1);
                 lcd.print("P");
-                lcd.print(partition + 1);
+                lcd.print(pos + 1);
                 lcd.print(" ");
             }
             
-            DEBUG_PRINT(F("  Attempting partition #"));
-            DEBUG_PRINTLN(partition + 1);
+            // DELETE SEQUENCE:
+            // 1. TAB to change to delete panel
+            // 2. RIGHT to delete button
+            // 3. ENTER to click delete
+            // 4. TAB to OK button in confirm dialog
+            // 5. ENTER to confirm
             
-            // METHOD 1: Try DELETE key first (direct shortcut)
-            pressKey(KEY_DELETE);
-            delay(500);
-            
-            // Check for confirmation dialog - Tab to Yes and Enter
-            pressKey(KEY_TAB);  // Move to Yes button
-            delay(100);
-            pressKey(KEY_RETURN);  // Confirm
-            delay(800);
-            
-            // METHOD 2: Try ALT+D as backup (some BIOS/Windows versions)
-            pressCombo(KEY_LEFT_ALT, 'd');
+            // TAB to change to delete panel
+            pressKey(KEY_TAB);
             delay(400);
             
-            // Confirm deletion if dialog appeared
+            // RIGHT to delete button
+            pressKey(KEY_RIGHT_ARROW);
+            delay(400);
+            
+            // ENTER to click delete
+            pressKey(KEY_RETURN);
+            delay(500);
+            
+            // TAB to OK button
             pressKey(KEY_TAB);
-            delay(100);
+            delay(300);
+            
+            // ENTER to confirm
             pressKey(KEY_RETURN);
             delay(600);
             
-            // METHOD 3: Try Left arrow + Enter for dialogs that default to No
-            pressKey(KEY_LEFT_ARROW);
-            delay(100);
-            pressKey(KEY_RETURN);
-            delay(500);
-            
-            // Move to next partition (will skip if current was deleted)
-            pressKey(KEY_DOWN_ARROW);
+            // Move to next partition row (UP or DOWN)
+            if (goingDown) {
+                pressKey(KEY_DOWN_ARROW);
+            } else {
+                pressKey(KEY_UP_ARROW);
+            }
             delay(300);
         }
         
-        delay(1000);  // Pause between passes
+        // After each sweep, go to opposite end to start next sweep
+        if (goingDown) {
+            // We were going down, now go to top for up sweep
+            for (int i = 0; i < 10; i++) {
+                pressKey(KEY_UP_ARROW);
+                delay(60);
+            }
+            pressKey(KEY_DOWN_ARROW);  // Skip header
+            delay(100);
+        } else {
+            // We were going up, now go to bottom for down sweep
+            for (int i = 0; i < 10; i++) {
+                pressKey(KEY_DOWN_ARROW);
+                delay(60);
+            }
+        }
+        delay(200);
     }
     
-    // Final cleanup - try to select unallocated space
+    DEBUG_PRINT(F("Smart deletion complete. Total attempts: "));
+    DEBUG_PRINTLN(totalAttempts);
+    
+    // Final cleanup - select unallocated space and start install
     if (lcdAvailable) {
-        showStatus("FINALIZING", "Selecting...");
+        showStatus("FINALIZING", "Starting...");
     }
-    DEBUG_PRINTLN(F("Selecting unallocated space..."));
+    DEBUG_PRINTLN(F("Selecting unallocated space and starting install..."));
     
-    // Go back to top and select first item (should be unallocated space now)
+    // Go to top
     for (int i = 0; i < 10; i++) {
         pressKey(KEY_UP_ARROW);
-        delay(100);
+        delay(80);
     }
-    pressKey(KEY_DOWN_ARROW);  // Select first partition/unallocated space
+    
+    // Select first item (should be unallocated space)
+    pressKey(KEY_DOWN_ARROW);
     delay(300);
     
     // Tab to Next button and press Enter
     for (int i = 0; i < 6; i++) {
         pressKey(KEY_TAB);
-        delay(150);
+        delay(120);
     }
     pressKey(KEY_RETURN);
-    delay(1000);
+    delay(800);
     
-    // Press Enter again in case of confirmation
+    // Press Enter again in case of any confirmation dialog
     pressKey(KEY_RETURN);
     delay(500);
     
